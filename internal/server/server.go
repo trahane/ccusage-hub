@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/trahane/ccusage-hub/internal/limits"
 	"github.com/trahane/ccusage-hub/internal/model"
 	"github.com/trahane/ccusage-hub/internal/store"
 )
@@ -20,25 +21,32 @@ import (
 const maxSnapshotBytes = 5 << 20
 
 type Config struct {
-	Listen   string
-	Timezone string
-	Version  string
+	Listen          string
+	Timezone        string
+	Version         string
+	CodexBarCommand string
 }
 
 type Server struct {
 	store  *store.Store
 	config Config
 	log    *slog.Logger
+	limits *limits.Collector
 }
 
 func New(storage *store.Store, config Config, logger *slog.Logger) *Server {
-	return &Server{store: storage, config: config, log: logger}
+	var collector *limits.Collector
+	if config.CodexBarCommand != "" {
+		collector = limits.New(config.CodexBarCommand, logger)
+	}
+	return &Server{store: storage, config: config, log: logger, limits: collector}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /api/v1/info", s.info)
+	mux.HandleFunc("GET /api/v1/limits", s.usageLimits)
 	mux.HandleFunc("POST /api/v1/snapshots", s.ingest)
 	mux.HandleFunc("GET /api/v1/usage", s.usage)
 	mux.HandleFunc("GET /api/v1/models", s.models)
@@ -48,6 +56,9 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	if s.limits != nil {
+		s.limits.Start(ctx)
+	}
 	httpServer := &http.Server{
 		Addr:              s.config.Listen,
 		Handler:           s.Handler(),
@@ -101,7 +112,19 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) info(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"version": s.config.Version, "schemaVersion": model.SchemaVersion, "timezone": s.config.Timezone, "capabilities": []string{"snapshots", "devices", "models", "costs", "rename", "high-water"}})
+	capabilities := []string{"snapshots", "devices", "models", "costs", "rename", "high-water"}
+	if s.limits != nil {
+		capabilities = append(capabilities, "limits")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": s.config.Version, "schemaVersion": model.SchemaVersion, "timezone": s.config.Timezone, "capabilities": capabilities})
+}
+
+func (s *Server) usageLimits(w http.ResponseWriter, _ *http.Request) {
+	if s.limits == nil {
+		writeError(w, http.StatusServiceUnavailable, "limits collector is not configured")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.limits.Snapshot(s.config.Timezone))
 }
 
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
