@@ -11,6 +11,8 @@
     <string>run</string>
     <string>--server</string>
     <string>http://pibot:7432</string>
+    <string>--interval</string>
+    <string>10m</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -23,7 +25,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
 </dict>
 </plist>

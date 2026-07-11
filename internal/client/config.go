@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/trahane/ccusage-hub/internal/model"
 )
@@ -17,6 +18,8 @@ type Config struct {
 	CCUsageCommand string `json:"ccusageCommand"`
 	Interval       string `json:"interval"`
 	LookbackDays   int    `json:"lookbackDays"`
+	BackfillDays   int    `json:"backfillDays"`
+	BackfilledAt   string `json:"backfilledAt,omitempty"`
 }
 
 func DefaultConfigPath() (string, error) {
@@ -39,6 +42,7 @@ func LoadConfig(path string) (Config, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return Config{}, err
 	}
+	applyDefaults(&config)
 	if err := validateConfig(config); err != nil {
 		return Config{}, err
 	}
@@ -54,7 +58,7 @@ func createConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	config := Config{DeviceID: id, DeviceName: hostname, ServerURL: "http://127.0.0.1:7432", CCUsageCommand: "ccusage", Interval: "10m", LookbackDays: 30}
+	config := Config{DeviceID: id, DeviceName: hostname, ServerURL: "http://127.0.0.1:7432", CCUsageCommand: "ccusage", Interval: "10m", LookbackDays: 30, BackfillDays: 366}
 	if err := SaveConfig(path, config); err != nil {
 		return Config{}, err
 	}
@@ -96,5 +100,19 @@ func validateConfig(config Config) error {
 	if config.LookbackDays < 1 || config.LookbackDays > 366 {
 		return errors.New("lookbackDays must be between 1 and 366")
 	}
+	if config.BackfillDays < config.LookbackDays || config.BackfillDays > 366 {
+		return errors.New("backfillDays must be between lookbackDays and 366")
+	}
+	if config.BackfilledAt != "" {
+		if _, err := time.Parse(time.RFC3339, config.BackfilledAt); err != nil {
+			return errors.New("backfilledAt must be an RFC3339 timestamp")
+		}
+	}
 	return nil
+}
+
+func applyDefaults(config *Config) {
+	if config.BackfillDays == 0 {
+		config.BackfillDays = 366
+	}
 }

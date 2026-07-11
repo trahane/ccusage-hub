@@ -30,7 +30,12 @@ func (c *Client) Push(ctx context.Context) (model.IngestResult, error) {
 	}
 	buildCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	snapshot, err := BuildSnapshot(buildCtx, c.Config, timezone, c.Version)
+	snapshotConfig := c.Config
+	isBackfill := c.Config.BackfilledAt == ""
+	if isBackfill {
+		snapshotConfig.LookbackDays = c.Config.BackfillDays
+	}
+	snapshot, err := BuildSnapshot(buildCtx, snapshotConfig, timezone, c.Version)
 	if err != nil {
 		return model.IngestResult{}, err
 	}
@@ -52,6 +57,13 @@ func (c *Client) Push(ctx context.Context) (model.IngestResult, error) {
 	var result model.IngestResult
 	if err := json.Unmarshal(data, &result); err != nil {
 		return result, err
+	}
+	if isBackfill {
+		c.Config.BackfilledAt = time.Now().UTC().Format(time.RFC3339)
+		if err := SaveConfig(c.ConfigPath, c.Config); err != nil {
+			return result, fmt.Errorf("snapshot accepted but backfill state could not be saved: %w", err)
+		}
+		c.Log.Info("initial usage backfill completed", "days", snapshotConfig.LookbackDays)
 	}
 	c.Log.Info("snapshot submitted", "snapshotId", result.SnapshotID, "status", result.Status, "appliedBuckets", result.AppliedBuckets, "tokenDelta", result.TokenDelta, "costDeltaUSD", result.CostDeltaUSD)
 	return result, nil

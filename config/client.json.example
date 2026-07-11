@@ -4,5 +4,6 @@
   "serverURL": "http://pibot:7432",
   "ccusageCommand": "ccusage",
   "interval": "10m",
-  "lookbackDays": 30
+  "lookbackDays": 30,
+  "backfillDays": 366
 }

@@ -6,7 +6,7 @@ The project is designed for a trusted LAN or Tailnet. Version 1 intentionally ha
 
 ## How it works
 
-Every client submits the last 30 days of cumulative usage every 10 minutes. The server keeps one high-water bucket for each `device + date + ccusage source`. If a Mac reports 100 tokens and later reports 130, the fleet total becomes 130—not 230. The complete model breakdown and client-calculated cost are replaced atomically with that bucket.
+On its first successful connection, every client submits up to 366 days of available history. It records that completion locally, then submits the last 30 days of cumulative usage every 10 minutes. The server keeps one high-water bucket for each `device + date + ccusage source`. If a Mac reports 100 tokens and later reports 130, the fleet total becomes 130—not 230. The complete model breakdown and client-calculated cost are replaced atomically with that bucket.
 
 - Higher totals advance the high-water mark.
 - Duplicate snapshots are idempotent.
@@ -34,6 +34,10 @@ The server listens on `0.0.0.0:7432`, stores SQLite data at `~/.local/share/ccus
 ## Install a macOS client
 
 Install `ccusage`, download or build the `ccusage-hub` binary, and run:
+
+```bash
+npm install --global ccusage@20.0.17
+```
 
 ```bash
 ./scripts/install-launchd.sh
@@ -87,6 +91,8 @@ See [docs/api.md](docs/api.md) for the complete request contract and response se
 ## Configuration and recovery
 
 Client configuration lives in the operating system's standard user config directory. Back it up to preserve the device UUID across reinstalls. Display names need not be unique.
+
+`backfillDays` defaults to 366 and `lookbackDays` defaults to 30. After the first successful historical snapshot, the client writes `backfilledAt` to its config. Removing only `backfilledAt` safely repeats the backfill; the server's high-water buckets prevent double-counting.
 
 To deliberately accept a lower observation after local logs were corrected or deleted:
 
