@@ -1,0 +1,15 @@
+[Unit]
+Description=ccusage-hub aggregation server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/ccusage-hub server --listen 0.0.0.0:7432 --database %h/.local/share/ccusage-hub/ccusage-hub.db --timezone America/Los_Angeles
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

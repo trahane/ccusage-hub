@@ -1,0 +1,15 @@
+[Unit]
+Description=ccusage-hub local usage client
+After=network-online.target ccusage-hub-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/ccusage-hub client run --server http://127.0.0.1:7432 --interval 10m
+Restart=always
+RestartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

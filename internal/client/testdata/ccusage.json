@@ -1,0 +1,29 @@
+{
+  "daily": [
+    {
+      "period": "2026-07-10",
+      "agents": [
+        {
+          "agent": "codex",
+          "inputTokens": 100,
+          "outputTokens": 20,
+          "cacheReadTokens": 500,
+          "cacheCreationTokens": 5,
+          "totalTokens": 625,
+          "totalCost": 1.23456789,
+          "modelBreakdowns": [
+            {
+              "modelName": "gpt-test",
+              "inputTokens": 100,
+              "outputTokens": 20,
+              "cacheReadTokens": 500,
+              "cacheCreationTokens": 5,
+              "cost": 1.23456789
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "totals": { "totalTokens": 625, "totalCost": 1.23456789 }
+}
