@@ -58,6 +58,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 	listen := flags.String("listen", env("CCUSAGE_HUB_LISTEN", "0.0.0.0:7432"), "HTTP listen address")
 	database := flags.String("database", env("CCUSAGE_HUB_DATABASE", "./data/ccusage-hub.db"), "SQLite database path")
 	timezone := flags.String("timezone", env("CCUSAGE_HUB_TIMEZONE", "America/Los_Angeles"), "canonical IANA timezone")
+	codexbarCommand := flags.String("codexbar-command", os.Getenv("CCUSAGE_HUB_CODEXBAR_COMMAND"), "optional CodexBar CLI path for subscription limits")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -69,7 +70,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 		return err
 	}
 	defer storage.Close()
-	return server.New(storage, server.Config{Listen: *listen, Timezone: *timezone, Version: version}, logger).Run(ctx)
+	return server.New(storage, server.Config{Listen: *listen, Timezone: *timezone, Version: version, CodexBarCommand: *codexbarCommand}, logger).Run(ctx)
 }
 
 func runClient(ctx context.Context, logger *slog.Logger, args []string) error {
@@ -160,7 +161,7 @@ func printUsage() {
 	fmt.Print(`ccusage-hub - distributed ccusage aggregation
 
 Commands:
-  ccusage-hub server [--listen 0.0.0.0:7432] [--database PATH] [--timezone IANA]
+  ccusage-hub server [--listen 0.0.0.0:7432] [--database PATH] [--timezone IANA] [--codexbar-command PATH]
   ccusage-hub client run [--server URL] [--interval 10m]
   ccusage-hub client push [--server URL]
   ccusage-hub client rename [--server URL] "Display name"

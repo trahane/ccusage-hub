@@ -66,12 +66,18 @@ ccusage-hub server \
 
 Environment equivalents are available as `CCUSAGE_HUB_LISTEN`, `CCUSAGE_HUB_DATABASE`, `CCUSAGE_HUB_TIMEZONE`, and `CCUSAGE_HUB_LOG_LEVEL`.
 
+To add subscription quota windows, install CodexBar CLI and set
+`CCUSAGE_HUB_CODEXBAR_COMMAND` to its executable path (or pass
+`--codexbar-command`). Codex is collected every minute and Claude every three
+minutes. The last successful result remains available if a later probe fails.
+
 ## API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/api/v1/snapshots` | Submit a cumulative client snapshot |
 | `GET` | `/api/v1/usage?days=7` | Daily fleet totals with source, model, and device breakdowns |
+| `GET` | `/api/v1/limits` | Cached Codex and Claude subscription windows and reset times |
 | `GET` | `/api/v1/models?days=30&source=codex` | Model-level usage and cost totals |
 | `GET` | `/api/v1/devices` | Devices, names, last-seen timestamps, usage, and costs |
 | `PATCH` | `/api/v1/devices/{uuid}` | Rename a client |

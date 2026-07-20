@@ -66,6 +66,54 @@ func TestSnapshotAPIAndRename(t *testing.T) {
 	}
 }
 
+func TestLimitsCapabilityAndEndpoint(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "api.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := New(db, Config{Timezone: "America/Los_Angeles", Version: "test", CodexBarCommand: "/unused/codexbar"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	httpServer := httptest.NewServer(s.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/v1/info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	found := false
+	for _, capability := range info.Capabilities {
+		found = found || capability == "limits"
+	}
+	if !found {
+		t.Fatalf("limits capability missing: %v", info.Capabilities)
+	}
+
+	response, err = http.Get(httpServer.URL + "/api/v1/limits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("limits status %d", response.StatusCode)
+	}
+	var limitsResponse struct {
+		SchemaVersion int `json:"schemaVersion"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&limitsResponse); err != nil {
+		t.Fatal(err)
+	}
+	if limitsResponse.SchemaVersion != model.SchemaVersion {
+		t.Fatalf("schema version %d", limitsResponse.SchemaVersion)
+	}
+}
+
 func mustLocation(t *testing.T, name string) *time.Location {
 	t.Helper()
 	location, err := time.LoadLocation(name)

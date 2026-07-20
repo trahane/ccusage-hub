@@ -60,6 +60,19 @@ Returns model totals across the requested range. `source` is optional.
 
 Returns device identity, display name, platform, client version, first/last seen timestamps, and authoritative usage totals.
 
+## Read subscription limits
+
+`GET /api/v1/limits`
+
+When the optional CodexBar collector is configured, this endpoint returns cached
+Codex and Claude five-hour, weekly, and additional quota windows. Each window
+contains `usedPercent`, `windowMinutes`, and an RFC 3339 `resetsAt` timestamp.
+Provider entries include their source, CLI version, last successful update, and a
+stale error while retaining the last good windows if a later collection fails.
+
+The matching `limits` capability appears in `/api/v1/info` only when the collector
+is configured.
+
 ## Rename a device
 
 `PATCH /api/v1/devices/{deviceId}`
