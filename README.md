@@ -1,4 +1,8 @@
-# ccusage-hub
+<p align="center">
+  <img src="assets/ccusage-hub.png" alt="ccusage-hub logo" width="160">
+</p>
+
+<h1 align="center">ccusage-hub</h1>
 
 `ccusage-hub` combines token and cost usage from multiple computers without double-counting repeated reports. Each client runs [ccusage](https://github.com/ryoppippi/ccusage), sends cumulative snapshots to one small server, and the server exposes fleet-wide daily, source, model, device, and cost totals.
 
