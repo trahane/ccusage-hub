@@ -69,6 +69,7 @@ func New(command string, logger *slog.Logger) *Collector {
 func (c *Collector) Start(ctx context.Context) {
 	go c.loop(ctx, "codex", "oauth", time.Minute)
 	go c.loop(ctx, "claude", "cli", 3*time.Minute)
+	go c.loop(ctx, "antigravity", "auto", 3*time.Minute)
 }
 
 func (c *Collector) loop(ctx context.Context, provider, source string, interval time.Duration) {

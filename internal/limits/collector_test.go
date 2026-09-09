@@ -1,6 +1,11 @@
 package limits
 
 import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -28,5 +33,40 @@ func TestDecodeExtraWindowsAndCredits(t *testing.T) {
 	}
 	if result.ResetCredits != 2 || len(result.Extra) != 1 || result.Extra[0].Title != "Codex Spark 5-hour" {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestAntigravityCollectionRetainsQuotaPoolsAfterFailure(t *testing.T) {
+	collector := New("codexbar", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	calls := 0
+	collector.run = func(_ context.Context, command string, args ...string) ([]byte, error) {
+		if command != "codexbar" || !reflect.DeepEqual(args, []string{"usage", "--provider", "antigravity", "--source", "auto", "--format", "json", "--no-color"}) {
+			t.Fatalf("unexpected command: %s %v", command, args)
+		}
+		calls++
+		if calls == 2 {
+			return nil, errors.New("Antigravity unavailable")
+		}
+		return []byte(`[{"provider":"antigravity","source":"cli","usage":{"identity":{"loginMethod":"Google AI Pro"},"primary":{"usedPercent":12,"windowMinutes":10080,"resetsAt":"2026-09-10T19:22:03Z"},"secondary":{"usedPercent":0,"windowMinutes":300,"resetsAt":"2026-09-09T03:54:32Z"},"extraRateWindows":[{"title":"Gemini 5-hour","window":{"usedPercent":3,"windowMinutes":300,"resetsAt":"2026-09-09T03:54:32Z"}}],"updatedAt":"2026-09-08T23:00:00Z"}}]`), nil
+	}
+	collector.collect(context.Background(), "antigravity", "auto")
+	fresh := collector.Snapshot("UTC").Providers[0]
+	if fresh.Stale || fresh.Plan != "Google AI Pro" || fresh.Primary == nil || fresh.Primary.UsedPercent != 12 || fresh.Primary.WindowMinutes != 10080 || fresh.Secondary == nil || fresh.Secondary.UsedPercent != 0 {
+		t.Fatalf("unexpected quota pools: %+v", fresh)
+	}
+	if len(fresh.Extra) != 1 || fresh.Extra[0].Title != "Gemini 5-hour" || fresh.Extra[0].ResetsAt == nil {
+		t.Fatalf("lost named model quota: %+v", fresh.Extra)
+	}
+	collector.collect(context.Background(), "antigravity", "auto")
+	stale := collector.Snapshot("UTC").Providers[0]
+	if !stale.Stale || stale.Error != "Antigravity unavailable" || !stale.UpdatedAt.Equal(fresh.UpdatedAt) || !reflect.DeepEqual(stale.Primary, fresh.Primary) || !reflect.DeepEqual(stale.Extra, fresh.Extra) {
+		t.Fatalf("lost cached quota on failure: %+v", stale)
+	}
+}
+
+func TestAntigravityMissingPoolsRemainAbsent(t *testing.T) {
+	result, err := decode("antigravity", []byte(`[{"provider":"antigravity","usage":{"extraRateWindows":[{"title":"Gemini model","window":{"usedPercent":25}}]}}]`))
+	if err != nil || result.Primary != nil || result.Secondary != nil || len(result.Extra) != 1 {
+		t.Fatalf("unexpected sparse quotas: %+v, %v", result, err)
 	}
 }

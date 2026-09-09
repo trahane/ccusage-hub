@@ -65,7 +65,10 @@ Returns device identity, display name, platform, client version, first/last seen
 `GET /api/v1/limits`
 
 When the optional CodexBar collector is configured, this endpoint returns cached
-Codex and Claude five-hour, weekly, and additional quota windows. Each window
+Codex and Claude five-hour, weekly, and additional quota windows, plus Antigravity
+model quotas. For `antigravity`, `primary` represents Gemini Models and `secondary`
+represents Claude and GPT; additional named quotas appear in `extra`. Missing
+quota pools are omitted, and durations may be zero when unknown. Each window
 contains `usedPercent`, `windowMinutes`, and an RFC 3339 `resetsAt` timestamp.
 Provider entries include their source, CLI version, last successful update, and a
 stale error while retaining the last good windows if a later collection fails.

@@ -73,7 +73,21 @@ Environment equivalents are available as `CCUSAGE_HUB_LISTEN`, `CCUSAGE_HUB_DATA
 To add subscription quota windows, install CodexBar CLI and set
 `CCUSAGE_HUB_CODEXBAR_COMMAND` to its executable path (or pass
 `--codexbar-command`). Codex is collected every minute and Claude every three
-minutes. The last successful result remains available if a later probe fails.
+minutes. Antigravity is collected every three minutes using `--source auto`.
+The last successful result remains available if a later probe fails.
+
+### Antigravity quotas
+Use a CodexBar CLI version that supports `antigravity` and verify access on the
+hub host with `codexbar usage --provider antigravity --source auto --format json`.
+The collector runs as the server user, so its signed-in Antigravity app or CodexBar
+Antigravity credentials must be available to that user on that machine. A hub on
+another machine does not automatically read a client’s Antigravity session.
+
+Antigravity `primary` is the Gemini Models quota pool and `secondary` is the
+Claude and GPT pool, not five-hour and weekly windows. Additional named model
+quotas are preserved in `extra`; missing pools stay absent. Collection failures
+mark the last successful reading stale. CodexBar does not provide Antigravity
+token/cost history; the normal usage ingestion accepts it if a client reports it.
 
 ## API
 
@@ -81,7 +95,7 @@ minutes. The last successful result remains available if a later probe fails.
 | --- | --- | --- |
 | `POST` | `/api/v1/snapshots` | Submit a cumulative client snapshot |
 | `GET` | `/api/v1/usage?days=7` | Daily fleet totals with source, model, and device breakdowns |
-| `GET` | `/api/v1/limits` | Cached Codex and Claude subscription windows and reset times |
+| `GET` | `/api/v1/limits` | Cached Codex, Claude, and Antigravity quota windows and reset times |
 | `GET` | `/api/v1/models?days=30&source=codex` | Model-level usage and cost totals |
 | `GET` | `/api/v1/devices` | Devices, names, last-seen timestamps, usage, and costs |
 | `PATCH` | `/api/v1/devices/{uuid}` | Rename a client |
