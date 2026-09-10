@@ -33,7 +33,7 @@ func snapshot(id, deviceID, name string, captured time.Time, total int64, cost, 
 		SchemaVersion: model.SchemaVersion, SnapshotID: id, CapturedAt: captured,
 		Device:  model.Device{ID: deviceID, Name: name, Platform: "test", ClientVersion: "test"},
 		CCUsage: model.CCUsageInfo{Version: "20.0.17", LookbackDays: 30},
-		Days:    []model.DayUsage{{Date: "2026-07-10", Sources: []model.SourceUsage{{Source: "codex", Metrics: model.Metrics{InputTokens: input, OutputTokens: output, CacheReadTokens: cache, TotalTokens: total, CostUSD: cost}, Models: []model.ModelUsage{{ModelName: modelName, Metrics: model.Metrics{InputTokens: input, OutputTokens: output, CacheReadTokens: cache, TotalTokens: total, CostUSD: cost}}}}}}},
+		Days:    []model.DayUsage{{Date: captured.UTC().Format("2006-01-02"), Sources: []model.SourceUsage{{Source: "codex", Metrics: model.Metrics{InputTokens: input, OutputTokens: output, CacheReadTokens: cache, TotalTokens: total, CostUSD: cost}, Models: []model.ModelUsage{{ModelName: modelName, Metrics: model.Metrics{InputTokens: input, OutputTokens: output, CacheReadTokens: cache, TotalTokens: total, CostUSD: cost}}}}}}},
 	}
 }
 
@@ -49,7 +49,7 @@ func ingest(t *testing.T, s *Store, value model.Snapshot) model.IngestResult {
 
 func TestHighWaterAndFleetAggregation(t *testing.T) {
 	s := openTestStore(t)
-	base := time.Date(2026, 7, 10, 12, 30, 0, 0, time.UTC)
+	base := time.Now().UTC().Add(-time.Hour)
 	first := ingest(t, s, snapshot("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", deviceOne, "MacBook Pro", base, 100, "1.25", "gpt-a"))
 	if first.TokenDelta != 100 || first.CostDeltaUSD != "1.25" {
 		t.Fatalf("first delta: %+v", first)
@@ -68,7 +68,7 @@ func TestHighWaterAndFleetAggregation(t *testing.T) {
 	}
 	ingest(t, s, snapshot("dddddddd-dddd-4ddd-8ddd-dddddddddddd", deviceTwo, "Mac Mini", base, 50, "0.5", "gpt-a"))
 
-	usage, err := s.Usage(context.Background(), 7, "America/Los_Angeles")
+	usage, err := s.Usage(context.Background(), 7, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,7 +18,25 @@ func TestBuildSnapshotFromCCUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := filepath.Join(dir, "fake-ccusage")
-	content := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'ccusage 20.0.17'; else cat <<'JSON'\n" + string(fixture) + "\nJSON\nfi\n"
+	content := `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo 'ccusage 20.0.17'
+  exit 0
+fi
+online=false
+for arg in "$@"; do
+  case "$arg" in
+    --offline) echo 'offline pricing leaves newer models unpriced' >&2; exit 1 ;;
+    --no-offline) online=true ;;
+  esac
+done
+if [ "$online" != true ]; then
+  echo 'online pricing must override ccusage offline configuration' >&2
+  exit 1
+fi
+cat <<'JSON'
+` + string(fixture) + "\nJSON\n"
+
 	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +49,9 @@ func TestBuildSnapshotFromCCUsage(t *testing.T) {
 		t.Fatalf("snapshot: %+v", snapshot)
 	}
 	model := snapshot.Days[0].Sources[0].Models[0]
-	if model.TotalTokens != 625 || model.ModelName != "gpt-test" {
+	if model.TotalTokens != 625 || model.InputTokens != 100 || model.CacheReadTokens != 500 ||
+		model.CacheCreationTokens != 5 || model.OutputTokens != 20 ||
+		model.CostUSD != "1.23456789" || model.ModelName != "gpt-test" {
 		t.Fatalf("model: %+v", model)
 	}
 }

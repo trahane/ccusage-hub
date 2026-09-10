@@ -40,7 +40,7 @@ The server listens on `0.0.0.0:7432`, stores SQLite data at `~/.local/share/ccus
 Install `ccusage`, download or build the `ccusage-hub` binary, and run:
 
 ```bash
-npm install --global ccusage@20.0.17
+npm install --global ccusage@20.0.20
 ```
 
 ```bash
@@ -107,6 +107,25 @@ Example dashboard query:
 ```bash
 curl 'http://pibot:7432/api/v1/usage?days=7'
 ```
+
+Use ccusage 20.0.20 or newer: the older 20.0.17 can count repeated Codex token-status
+events more than once. Upgrade ccusage on each collector host, not only the hub server.
+
+Collectors explicitly enable online pricing (`--no-offline`) so ccusage can refresh model
+rates instead of relying only on its bundled pricing snapshot. The hub preserves ccusage's
+input, cached-input, output, and cost breakdowns; ccusage handles session and fork accounting.
+A fork's new requests, including processing inherited context, contribute usage. Copied
+historical usage records must not be added again as new requests.
+
+After updating an existing collector, refresh available historical costs with:
+
+```bash
+ccusage-hub client push --lookback-days 366
+```
+
+Newer snapshots with unchanged token totals can replace costs. If local history now reports
+fewer tokens, the high-water rule retains the existing bucket; this command does not force
+those lower observations into the totals.
 
 All cost fields use decimal USD strings, for example `"13.44311715"`. Costs come directly from each client's pricing data, so the server records the submitting `ccusage` version. If source totals differ from model rows, the source remains authoritative and the server records an ingestion warning.
 
