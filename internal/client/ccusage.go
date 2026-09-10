@@ -53,7 +53,7 @@ func BuildSnapshot(ctx context.Context, config Config, timezone, version string)
 	if len(parts) == 0 {
 		return model.Snapshot{}, errors.New("empty ccusage command")
 	}
-	args := append(parts[1:], "daily", "--since", start, "--timezone", timezone, "--by-agent", "--json", "--offline")
+	args := append(parts[1:], "daily", "--since", start, "--timezone", timezone, "--by-agent", "--json", "--no-offline")
 	command := exec.CommandContext(ctx, parts[0], args...)
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
