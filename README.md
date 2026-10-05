@@ -147,7 +147,30 @@ ccusage-hub admin rebase \
   --source codex
 ```
 
-Raw compressed snapshots and normalized observations are retained indefinitely. Back up the SQLite database according to your storage requirements.
+Daily usage totals and model breakdowns are retained permanently. Raw snapshots
+and observation audit history are retained for seven days; consecutive identical
+observations share one row. The latest observation for each device/date/source is
+kept even after that window so `admin rebase` continues to work for old history.
+Snapshot metadata referenced by totals or observations remains, but its expired
+payload and warnings are removed. Snapshot-ID deduplication is guaranteed during
+the audit window; older replayed uploads still follow the high-water rules.
+
+The server prunes on startup and hourly, truncates the SQLite WAL every minute,
+and compacts when at least 16 MiB and 25% of the database are free. Connection
+settings also enable automatic checkpoints and an 8 MiB journal size target.
+An external reader holding a transaction can delay truncation; blocked checkpoints
+are logged and retried. Back up the database using SQLite's backup API, or stop
+the server before copying it. Never delete the WAL manually.
+
+To reclaim an existing oversized database immediately, stop the server, take a
+backup, then run:
+
+```bash
+ccusage-hub admin compact --database ~/.local/share/ccusage-hub/ccusage-hub.db
+```
+
+Restart the server after compaction. This removes expired audit records while
+preserving daily totals, device names, and the latest observations for rebase.
 
 ## Development
 

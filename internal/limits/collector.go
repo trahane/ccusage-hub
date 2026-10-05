@@ -201,7 +201,12 @@ func decode(provider string, raw []byte) (ProviderLimits, error) {
 }
 
 func runCommand(ctx context.Context, command string, args ...string) ([]byte, error) {
-	output, err := exec.CommandContext(ctx, command, args...).Output()
+	cmd := exec.CommandContext(ctx, command, args...)
+	cleanup := containCommand(cmd)
+	defer cleanup()
+	// Bound waiting on pipes inherited by grandchildren after cancellation.
+	cmd.WaitDelay = 5 * time.Second
+	output, err := cmd.Output()
 	if err != nil {
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) && len(exitError.Stderr) > 0 {
