@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -97,7 +98,9 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path)
+	// Connection settings must survive database/sql replacing an idle connection.
+	dsn := (&url.URL{Scheme: "file", Path: path}).String() + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=wal_autocheckpoint(1000)&_pragma=journal_size_limit(8388608)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +183,10 @@ func (s *Store) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_current_date ON current_usage(usage_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_observations_bucket ON observations(device_id, usage_date, source, captured_at)`,
+		// Parent snapshot deletion otherwise scans the entire observations table
+		// for each foreign-key check during retention cleanup.
+		`CREATE INDEX IF NOT EXISTS idx_observations_snapshot ON observations(snapshot_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_current_snapshot ON current_usage(snapshot_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_snapshots_device ON snapshots(device_id, received_at)`,
 	}
 	for _, statement := range statements {
@@ -272,10 +279,7 @@ func (s *Store) Ingest(ctx context.Context, snapshot model.Snapshot, raw []byte)
 			} else {
 				result.IgnoredBuckets++
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO observations(snapshot_id,device_id,usage_date,source,input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,total_tokens,cost_nanos,models_json,captured_at,received_at,applied,reason,delta_tokens,delta_cost_nanos)
-				VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, snapshot.SnapshotID, snapshot.Device.ID, day.Date, source.Source, source.InputTokens, source.OutputTokens,
-				source.CacheReadTokens, source.CacheCreationTokens, source.TotalTokens, costNanos, modelsJSON, snapshot.CapturedAt.UTC().Format(time.RFC3339Nano),
-				receivedAt.Format(time.RFC3339Nano), boolInt(apply), reason, deltaTokens, deltaCost); err != nil {
+			if err := recordObservation(ctx, tx, snapshot, day.Date, source, costNanos, modelsJSON, receivedAt, apply, reason, deltaTokens, deltaCost); err != nil {
 				return result, err
 			}
 		}
@@ -560,7 +564,7 @@ func (s *Store) Rebase(ctx context.Context, deviceID, date, source string) error
 	var input, output, cacheRead, cacheCreate, total, cost int64
 	var modelsJSON, snapshotID, captured, received string
 	err = tx.QueryRowContext(ctx, `SELECT input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,total_tokens,cost_nanos,models_json,snapshot_id,captured_at,received_at
-		FROM observations WHERE device_id=? AND usage_date=? AND source=? ORDER BY captured_at DESC,received_at DESC LIMIT 1`, deviceID, date, source).Scan(&input, &output, &cacheRead, &cacheCreate, &total, &cost, &modelsJSON, &snapshotID, &captured, &received)
+		FROM observations WHERE device_id=? AND usage_date=? AND source=? ORDER BY captured_at DESC,received_at DESC,id DESC LIMIT 1`, deviceID, date, source).Scan(&input, &output, &cacheRead, &cacheCreate, &total, &cost, &modelsJSON, &snapshotID, &captured, &received)
 	if err != nil {
 		return err
 	}

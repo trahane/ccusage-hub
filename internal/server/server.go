@@ -56,6 +56,14 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		s.maintainStorage(ctx)
+	}()
+	defer func() { cancel(); <-maintenanceDone }()
 	if s.limits != nil {
 		s.limits.Start(ctx)
 	}
@@ -82,6 +90,39 @@ func (s *Server) Run(ctx context.Context) error {
 			return nil
 		}
 		return err
+	}
+}
+
+func (s *Server) maintainStorage(ctx context.Context) {
+	checkpoint := time.NewTicker(time.Minute)
+	defer checkpoint.Stop()
+	prune := time.NewTicker(time.Hour)
+	defer prune.Stop()
+	run := func(full bool) {
+		maintenanceCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		var err error
+		if full {
+			err = s.store.Maintain(maintenanceCtx, time.Now())
+		} else {
+			err = s.store.Checkpoint(maintenanceCtx)
+		}
+		if err != nil && ctx.Err() == nil {
+			s.log.Warn("storage maintenance failed", "prune", full, "error", err)
+		} else if full && err == nil {
+			s.log.Info("storage maintenance completed", "auditRetentionDays", 7)
+		}
+	}
+	run(true)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-checkpoint.C:
+			run(false)
+		case <-prune.C:
+			run(true)
+		}
 	}
 }
 

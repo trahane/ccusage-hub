@@ -131,8 +131,28 @@ func runClient(ctx context.Context, logger *slog.Logger, args []string) error {
 }
 
 func runAdmin(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "compact" {
+		flags := flag.NewFlagSet("admin compact", flag.ContinueOnError)
+		database := flags.String("database", env("CCUSAGE_HUB_DATABASE", "./data/ccusage-hub.db"), "SQLite database path (stop the server first)")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		storage, err := store.Open(*database)
+		if err != nil {
+			return err
+		}
+		defer storage.Close()
+		if err := storage.Prune(ctx, time.Now()); err != nil {
+			return err
+		}
+		if err := storage.Compact(ctx); err != nil {
+			return err
+		}
+		fmt.Println("expired audit history removed; usage totals preserved; database compacted")
+		return nil
+	}
 	if len(args) < 1 || args[0] != "rebase" {
-		return errors.New("usage: ccusage-hub admin rebase --device UUID --date YYYY-MM-DD --source NAME")
+		return errors.New("usage: ccusage-hub admin <compact|rebase> [flags]")
 	}
 	flags := flag.NewFlagSet("admin rebase", flag.ContinueOnError)
 	database := flags.String("database", env("CCUSAGE_HUB_DATABASE", "./data/ccusage-hub.db"), "SQLite database path")
@@ -166,6 +186,7 @@ Commands:
   ccusage-hub client push [--server URL]
   ccusage-hub client rename [--server URL] "Display name"
   ccusage-hub admin rebase --device UUID --date YYYY-MM-DD --source NAME
+  ccusage-hub admin compact --database PATH (stop server first)
   ccusage-hub version
 `)
 }
