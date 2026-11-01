@@ -7,12 +7,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 )
 
 const commandTimeout = 2 * time.Minute
+
+// errNotConfigured leaves a provider out of the response on hubs that do not use it.
+var errNotConfigured = errors.New("provider is not configured on the hub host")
 
 type Window struct {
 	UsedPercent   float64    `json:"usedPercent"`
@@ -49,9 +53,11 @@ type Response struct {
 type commandRunner func(context.Context, string, ...string) ([]byte, error)
 
 type Collector struct {
-	command string
-	log     *slog.Logger
-	run     commandRunner
+	command  string
+	log      *slog.Logger
+	run      commandRunner
+	grok     grokSource
+	opencode openCodeSource
 
 	mu        sync.RWMutex
 	providers map[string]ProviderLimits
@@ -62,6 +68,8 @@ func New(command string, logger *slog.Logger) *Collector {
 		command:   command,
 		log:       logger,
 		run:       runCommand,
+		grok:      defaultGrokSource(),
+		opencode:  defaultOpenCodeSource(),
 		providers: make(map[string]ProviderLimits),
 	}
 }
@@ -70,6 +78,8 @@ func (c *Collector) Start(ctx context.Context) {
 	go c.loop(ctx, "codex", "oauth", time.Minute)
 	go c.loop(ctx, "claude", "cli", 3*time.Minute)
 	go c.loop(ctx, "antigravity", "auto", 3*time.Minute)
+	go c.loop(ctx, "grok", "cli-proxy", 3*time.Minute)
+	go c.loop(ctx, "opencode", "api", 3*time.Minute)
 }
 
 func (c *Collector) loop(ctx context.Context, provider, source string, interval time.Duration) {
@@ -90,13 +100,12 @@ func (c *Collector) collect(ctx context.Context, provider, source string) {
 	started := time.Now().UTC()
 	commandCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	raw, err := c.run(commandCtx, c.command,
-		"usage", "--provider", provider, "--source", source,
-		"--format", "json", "--no-color",
-	)
-	var result ProviderLimits
-	if err == nil {
-		result, err = decode(provider, raw)
+	result, err := c.fetch(commandCtx, provider, source)
+	if errors.Is(err, errNotConfigured) {
+		c.mu.Lock()
+		delete(c.providers, provider)
+		c.mu.Unlock()
+		return
 	}
 	if err != nil {
 		c.mu.RLock()
@@ -118,6 +127,23 @@ func (c *Collector) collect(ctx context.Context, provider, source string) {
 	c.mu.Lock()
 	c.providers[provider] = result
 	c.mu.Unlock()
+}
+
+func (c *Collector) fetch(ctx context.Context, provider, source string) (ProviderLimits, error) {
+	switch provider {
+	case "grok":
+		return c.fetchGrok(ctx)
+	case "opencode":
+		return c.fetchOpenCode(ctx)
+	}
+	raw, err := c.run(ctx, c.command,
+		"usage", "--provider", provider, "--source", source,
+		"--format", "json", "--no-color",
+	)
+	if err != nil {
+		return ProviderLimits{}, err
+	}
+	return decode(provider, raw)
 }
 
 func (c *Collector) Snapshot(timezone string) Response {
@@ -210,7 +236,7 @@ func runCommand(ctx context.Context, command string, args ...string) ([]byte, er
 	if err != nil {
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) && len(exitError.Stderr) > 0 {
-			return nil, fmt.Errorf("CodexBar: %s", exitError.Stderr)
+			return nil, fmt.Errorf("%s: %s", filepath.Base(command), exitError.Stderr)
 		}
 		return nil, err
 	}
