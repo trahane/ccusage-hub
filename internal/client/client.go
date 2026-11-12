@@ -12,15 +12,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/trahane/ccusage-hub/internal/limits"
 	"github.com/trahane/ccusage-hub/internal/model"
 )
 
 type Client struct {
-	Config     Config
-	ConfigPath string
-	Version    string
-	HTTP       *http.Client
-	Log        *slog.Logger
+	Config      Config
+	ConfigPath  string
+	Version     string
+	HTTP        *http.Client
+	Log         *slog.Logger
+	probeLimits func(context.Context, string) limits.ProviderLimits
 }
 
 func (c *Client) Push(ctx context.Context) (model.IngestResult, error) {
@@ -73,18 +75,19 @@ func (c *Client) Run(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
 		return errors.New("interval must be positive")
 	}
-	for {
+	limitsInterval, err := time.ParseDuration(c.Config.LimitsInterval)
+	if err != nil || limitsInterval <= 0 {
+		return errors.New("limitsInterval must be positive")
+	}
+	limitsDone := make(chan struct{})
+	go func() { defer close(limitsDone); c.runLimitsJobs(ctx, limitsInterval) }()
+	runEvery(ctx, interval, func() {
 		if _, err := c.Push(ctx); err != nil {
 			c.Log.Error("snapshot submission failed", "error", err)
 		}
-		timer := time.NewTimer(model.Jitter(interval))
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil
-		case <-timer.C:
-		}
-	}
+	})
+	<-limitsDone
+	return nil
 }
 
 func (c *Client) Rename(ctx context.Context, name string) error {

@@ -75,7 +75,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 
 func runClient(ctx context.Context, logger *slog.Logger, args []string) error {
 	if len(args) < 1 {
-		return errors.New("usage: ccusage-hub client <run|push|rename>")
+		return errors.New("usage: ccusage-hub client <run|push|push-limits|run-limits|rename>")
 	}
 	command := args[0]
 	flags := flag.NewFlagSet("client "+command, flag.ContinueOnError)
@@ -86,6 +86,8 @@ func runClient(ctx context.Context, logger *slog.Logger, args []string) error {
 	configPath := flags.String("config", env("CCUSAGE_HUB_CLIENT_CONFIG", defaultPath), "client config path")
 	serverURL := flags.String("server", os.Getenv("CCUSAGE_HUB_SERVER"), "server base URL override")
 	ccusageCommand := flags.String("ccusage-command", os.Getenv("CCUSAGE_HUB_CCUSAGE_COMMAND"), "ccusage command override")
+	codexbarOverride := flags.String("codexbar-command", os.Getenv("CCUSAGE_HUB_CODEXBAR_COMMAND"), "CodexBar executable path override")
+	limitsIntervalOverride := flags.String("limits-interval", os.Getenv("CCUSAGE_HUB_LIMITS_INTERVAL"), "independent limits reporting interval")
 	intervalOverride := flags.String("interval", os.Getenv("CCUSAGE_HUB_INTERVAL"), "submission interval override")
 	lookbackOverride := flags.Int("lookback-days", envInt("CCUSAGE_HUB_LOOKBACK_DAYS", 0), "lookback override")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -104,8 +106,18 @@ func runClient(ctx context.Context, logger *slog.Logger, args []string) error {
 	if *lookbackOverride > 0 {
 		config.LookbackDays = *lookbackOverride
 	}
+	if *codexbarOverride != "" {
+		config.CodexBarCommand = *codexbarOverride
+	}
+	if *limitsIntervalOverride != "" {
+		config.LimitsInterval = *limitsIntervalOverride
+	}
 	c := &client.Client{Config: config, ConfigPath: *configPath, Version: version, Log: logger}
 	switch command {
+	case "push-limits":
+		return c.PushLimits(ctx)
+	case "run-limits":
+		return c.RunLimits(ctx)
 	case "push":
 		_, err := c.Push(ctx)
 		return err
@@ -131,6 +143,22 @@ func runClient(ctx context.Context, logger *slog.Logger, args []string) error {
 }
 
 func runAdmin(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "select-limit-account" {
+		flags := flag.NewFlagSet("admin select-limit-account", flag.ContinueOnError)
+		database := flags.String("database", env("CCUSAGE_HUB_DATABASE", "./data/ccusage-hub.db"), "SQLite database path")
+		provider := flags.String("provider", "", "provider name")
+		account := flags.String("account", "", "accountId from GET /api/v1/limits accounts")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		storage, err := store.Open(*database)
+		if err != nil {
+			return err
+		}
+		defer storage.Close()
+		return storage.SelectLimitAccount(ctx, *provider, *account)
+	}
+
 	if len(args) > 0 && args[0] == "compact" {
 		flags := flag.NewFlagSet("admin compact", flag.ContinueOnError)
 		database := flags.String("database", env("CCUSAGE_HUB_DATABASE", "./data/ccusage-hub.db"), "SQLite database path (stop the server first)")
@@ -182,9 +210,12 @@ func printUsage() {
 
 Commands:
   ccusage-hub server [--listen 0.0.0.0:7432] [--database PATH] [--timezone IANA] [--codexbar-command PATH]
-  ccusage-hub client run [--server URL] [--interval 10m]
+  ccusage-hub client run [--server URL] [--interval 10m] [--limits-interval 2m] [--codexbar-command PATH]
+  ccusage-hub client push-limits [--server URL] [--codexbar-command PATH]
+  ccusage-hub client run-limits [--server URL] [--limits-interval 2m]
   ccusage-hub client push [--server URL]
   ccusage-hub client rename [--server URL] "Display name"
+  ccusage-hub admin select-limit-account --database PATH --provider NAME --account ID
   ccusage-hub admin rebase --device UUID --date YYYY-MM-DD --source NAME
   ccusage-hub admin compact --database PATH (stop server first)
   ccusage-hub version

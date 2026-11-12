@@ -181,6 +181,15 @@ func (s *Store) migrate() error {
 			updated_at TEXT NOT NULL,
 			PRIMARY KEY(device_id, usage_date, source)
 		)`,
+		`CREATE TABLE IF NOT EXISTS limit_observations (
+   device_id TEXT NOT NULL REFERENCES devices(id), provider TEXT NOT NULL, account_id TEXT NOT NULL,
+   observed_at INTEGER NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY(device_id,provider,account_id)
+  )`,
+		`CREATE TABLE IF NOT EXISTS limit_sources (
+   device_id TEXT NOT NULL REFERENCES devices(id), provider TEXT NOT NULL, account_id TEXT NOT NULL,
+   checked_at INTEGER NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY(device_id,provider)
+  )`,
+		`CREATE TABLE IF NOT EXISTS limit_defaults (provider TEXT PRIMARY KEY, account_id TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS idx_current_date ON current_usage(usage_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_observations_bucket ON observations(device_id, usage_date, source, captured_at)`,
 		// Parent snapshot deletion otherwise scans the entire observations table

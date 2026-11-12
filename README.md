@@ -70,24 +70,67 @@ ccusage-hub server \
 
 Environment equivalents are available as `CCUSAGE_HUB_LISTEN`, `CCUSAGE_HUB_DATABASE`, `CCUSAGE_HUB_TIMEZONE`, and `CCUSAGE_HUB_LOG_LEVEL`.
 
-To add subscription quota windows, install CodexBar CLI and set
-`CCUSAGE_HUB_CODEXBAR_COMMAND` to its executable path (or pass
-`--codexbar-command`). Codex is collected every minute and Claude every three
-minutes. Antigravity is collected every three minutes using `--source auto`.
-The last successful result remains available if a later probe fails.
+### Distributed subscription limits
+
+Each `ccusage-hub client run` now runs independent jobs: token/cost snapshots on the
+existing cadence (default 10 minutes), and one limit check per provider every two
+minutes. Slow cost counting, backfills, missing provider credentials, or a blocked
+provider check do not block other limits jobs. Cancellation stops every job and
+its provider subprocesses. Each job retries on its next jittered interval.
+
+Install CodexBar CLI on reporting computers where the provider is signed in. The
+client queries local credentials/apps and posts normalized readings to
+`POST /api/v1/limits`; it never uploads provider credentials. The Pi needs no copy
+of a Mac's Antigravity credentials. `GET /api/v1/limits` serves the freshest healthy
+reporter for the selected account, retains last good readings offline, and marks
+each account stale independently. Existing mobile apps use the same version-1
+response. Limits data is persisted separately from token/cost accounting.
+
+Existing client configs receive defaults automatically. Optional configuration:
+
+```json
+{
+  "codexbarCommand": "codexbar",
+  "limitsInterval": "2m",
+  "limitProviders": ["codex", "claude", "antigravity"],
+  "limitAccounts": {"antigravity": "my-google-account"}
+}
+```
+
+`codexbarCommand` is an executable path, not a shell command. `limitAccounts` is
+optional and only supplies an identity when CodexBar cannot identify the account;
+use matching aliases only when the underlying provider account is the same. An
+explicit empty `limitProviders` array disables limits reporting on that client.
+Only the currently active account for each provider is collected. Account defaults
+are pinned to the first successful account; use the admin command documented in
+[docs/api.md](docs/api.md) to select another account without a mobile UI change.
+
+Run or test limits independently:
+
+```bash
+ccusage-hub client push-limits --server http://pibot:7432
+ccusage-hub client run-limits --server http://pibot:7432 --limits-interval 2m
+ccusage-hub client run --server http://pibot:7432 --interval 10m --limits-interval 2m
+```
+
+Use `--codexbar-command PATH` / `CCUSAGE_HUB_CODEXBAR_COMMAND` to override the binary,
+and `--limits-interval` / `CCUSAGE_HUB_LIMITS_INTERVAL` to override the cadence.
+`client push` remains a token/cost-only operation.
+
+The legacy optional server-local collector still works with
+`CCUSAGE_HUB_CODEXBAR_COMMAND` / `server --codexbar-command`. Its observations enter
+the same persistent selection module as client reports. Disable it when a client
+on that host already reports those accounts, to avoid redundant provider requests.
 
 ### Antigravity quotas
-Use a CodexBar CLI version that supports `antigravity` and verify access on the
-hub host with `codexbar usage --provider antigravity --source auto --format json`.
-The collector runs as the server user, so its signed-in Antigravity app or CodexBar
-Antigravity credentials must be available to that user on that machine. A hub on
-another machine does not automatically read a client’s Antigravity session.
 
-Antigravity `primary` is the Gemini Models quota pool and `secondary` is the
-Claude and GPT pool, not five-hour and weekly windows. Additional named model
-quotas are preserved in `extra`; missing pools stay absent. Collection failures
-mark the last successful reading stale. CodexBar does not provide Antigravity
-token/cost history; the normal usage ingestion accepts it if a client reports it.
+The reporting host must have a CodexBar version supporting its Antigravity app or
+`agy` CLI, with the provider already signed in there. Verify it with
+`codexbar usage --provider antigravity --source auto --format json`. Missing apps
+or logins are reported as provider failures and do not interrupt costs or other
+providers. The hub keeps named Gemini and Claude/GPT quota windows, including
+five-hour and weekly buckets when available. Unknown usage is omitted; quota
+percentages are never converted into token or cost estimates.
 
 ## API
 
@@ -95,7 +138,8 @@ token/cost history; the normal usage ingestion accepts it if a client reports it
 | --- | --- | --- |
 | `POST` | `/api/v1/snapshots` | Submit a cumulative client snapshot |
 | `GET` | `/api/v1/usage?days=7` | Daily fleet totals with source, model, and device breakdowns |
-| `GET` | `/api/v1/limits` | Cached Codex, Claude, and Antigravity quota windows and reset times |
+| `POST` | `/api/v1/limits` | Submit independent device/account quota observations |
+| `GET` | `/api/v1/limits` | Selected account quotas, reporting source, freshness, and all accounts |
 | `GET` | `/api/v1/models?days=30&source=codex` | Model-level usage and cost totals |
 | `GET` | `/api/v1/devices` | Devices, names, last-seen timestamps, usage, and costs |
 | `PATCH` | `/api/v1/devices/{uuid}` | Rename a client |
