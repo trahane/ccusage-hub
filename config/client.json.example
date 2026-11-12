@@ -5,5 +5,12 @@
   "ccusageCommand": "ccusage",
   "interval": "10m",
   "lookbackDays": 30,
-  "backfillDays": 366
+  "backfillDays": 366,
+  "codexbarCommand": "codexbar",
+  "limitsInterval": "2m",
+  "limitProviders": [
+    "codex",
+    "claude",
+    "antigravity"
+  ]
 }

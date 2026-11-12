@@ -47,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /api/v1/info", s.info)
 	mux.HandleFunc("GET /api/v1/limits", s.usageLimits)
+	mux.HandleFunc("POST /api/v1/limits", s.ingestLimits)
 	mux.HandleFunc("POST /api/v1/snapshots", s.ingest)
 	mux.HandleFunc("GET /api/v1/usage", s.usage)
 	mux.HandleFunc("GET /api/v1/models", s.models)
@@ -65,6 +66,12 @@ func (s *Server) Run(ctx context.Context) error {
 	}()
 	defer func() { cancel(); <-maintenanceDone }()
 	if s.limits != nil {
+		s.limits.OnCollect = func(p limits.ProviderLimits) {
+			report := limits.Report{SchemaVersion: 1, Device: model.Device{ID: "00000000-0000-4000-8000-000000000001", Name: "Hub local collector", Platform: "server", ClientVersion: s.config.Version}, CheckedAt: time.Now().UTC(), Providers: []limits.ProviderLimits{p}}
+			if err := s.store.IngestLimits(ctx, report); err != nil {
+				s.log.Warn("local limits persistence failed", "error", err)
+			}
+		}
 		s.limits.Start(ctx)
 	}
 	httpServer := &http.Server{
@@ -153,19 +160,43 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) info(w http.ResponseWriter, _ *http.Request) {
-	capabilities := []string{"snapshots", "devices", "models", "costs", "rename", "high-water"}
-	if s.limits != nil {
-		capabilities = append(capabilities, "limits")
-	}
+	capabilities := []string{"snapshots", "devices", "models", "costs", "rename", "high-water", "limits", "limits-reporting"}
 	writeJSON(w, http.StatusOK, map[string]any{"version": s.config.Version, "schemaVersion": model.SchemaVersion, "timezone": s.config.Timezone, "capabilities": capabilities})
 }
 
-func (s *Server) usageLimits(w http.ResponseWriter, _ *http.Request) {
-	if s.limits == nil {
-		writeError(w, http.StatusServiceUnavailable, "limits collector is not configured")
+func (s *Server) usageLimits(w http.ResponseWriter, r *http.Request) {
+	report, err := s.store.Limits(r.Context(), s.config.Timezone, time.Now().UTC(), r.URL.Query().Get("accountId"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "limits storage unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.limits.Snapshot(s.config.Timezone))
+	writeJSON(w, http.StatusOK, report)
+}
+
+func (s *Server) ingestLimits(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
+	var report limits.Report
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&report); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid limits report")
+		return
+	}
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "expected one limits report")
+		return
+	}
+	if err := report.Validate(time.Now().UTC()); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.IngestLimits(r.Context(), report); err != nil {
+		s.log.Error("limits ingestion failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "limits storage unavailable")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
