@@ -55,6 +55,9 @@ func (c *Client) pushProviderLimits(ctx context.Context, provider string) error 
 		}
 		p = limits.New(c.Config.CodexBarCommand, c.Log).Probe(ctx, provider, source)
 	}
+	if p.NotConfigured {
+		return nil
+	}
 	if p.AccountID == "" && c.Config.LimitAccounts[provider] != "" {
 		p.AccountLabel = c.Config.LimitAccounts[provider]
 		p.AccountID = limits.AccountKey("configured:"+p.AccountLabel, "")

@@ -1,6 +1,7 @@
 package limits
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -56,5 +57,23 @@ func TestDecodeSkipsUnknownQuotaValuesAndExtractsAccountIdentity(t *testing.T) {
 	}
 	if p.Primary != nil || p.Secondary == nil || len(p.Extra) != 0 || p.AccountID != AccountKey("test@example.com", "personal") {
 		t.Fatalf("unknown usage was presented as exhausted: %+v", p)
+	}
+}
+
+func TestNativeOpenCodeProbeDoesNotRequireCodexBar(t *testing.T) {
+	fixture := newOpenCodeFixture(t)
+	fixture.authFile(t, `{"opencode-go":{"type":"api","key":"good"}}`)
+	collector := fixture.collector("")
+	collector.run = func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("native provider invoked CodexBar")
+		return nil, nil
+	}
+	p := collector.Probe(context.Background(), "opencode", "api")
+	if p.Stale || p.NotConfigured || p.Primary == nil || p.Source != "opencode-go-api" {
+		t.Fatalf("native quotas were lost in reporting probe: %+v", p)
+	}
+	missing := newOpenCodeFixture(t).collector("").Probe(context.Background(), "opencode", "api")
+	if !missing.NotConfigured {
+		t.Fatalf("unconfigured native provider should be skipped: %+v", missing)
 	}
 }

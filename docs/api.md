@@ -75,7 +75,11 @@ account per provider, preserving the Android/iOS wire format. Each window contai
 `secondary`, and named `extra` windows retain their existing meaning. Antigravity
 `primary` is Gemini Models and `secondary` is Claude/GPT; `extra` preserves named
 five-hour and weekly quotas. Unknown quota values are omitted rather than shown as
-exhausted.
+exhausted. Grok's weekly or monthly quota is `secondary`, with its period length
+in `windowMinutes`; windows shorter than a day use `primary`. OpenCode Go uses
+`primary` for rolling five-hour quota, `secondary` for weekly, and `extra` for
+`Monthly`. Native Grok/OpenCode sources remain supported on both the hub and
+reporting clients; unconfigured native sources are omitted.
 
 Additional fields identify the `accountId`, `accountLabel`, `deviceId`, `deviceName`,
 `checkedAt`, and `receivedAt`. `updatedAt` is the original successful observation

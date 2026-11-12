@@ -7,12 +7,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 )
 
 const commandTimeout = 2 * time.Minute
+
+// Native providers can be absent on hosts without their local login.
+var errNotConfigured = errors.New("provider is not configured on this reporting host")
 
 type Window struct {
 	UsedPercent   float64    `json:"usedPercent"`
@@ -27,23 +31,24 @@ type ExtraWindow struct {
 }
 
 type ProviderLimits struct {
-	Provider     string        `json:"provider"`
-	AccountID    string        `json:"accountId,omitempty"`
-	AccountLabel string        `json:"accountLabel,omitempty"`
-	DeviceID     string        `json:"deviceId,omitempty"`
-	DeviceName   string        `json:"deviceName,omitempty"`
-	CheckedAt    time.Time     `json:"checkedAt,omitempty"`
-	ReceivedAt   time.Time     `json:"receivedAt,omitempty"`
-	Source       string        `json:"source,omitempty"`
-	Version      string        `json:"version,omitempty"`
-	Plan         string        `json:"plan,omitempty"`
-	Primary      *Window       `json:"primary,omitempty"`
-	Secondary    *Window       `json:"secondary,omitempty"`
-	Extra        []ExtraWindow `json:"extra"`
-	ResetCredits int           `json:"resetCredits,omitempty"`
-	UpdatedAt    time.Time     `json:"updatedAt"`
-	Stale        bool          `json:"stale,omitempty"`
-	Error        string        `json:"error,omitempty"`
+	Provider      string        `json:"provider"`
+	NotConfigured bool          `json:"-"`
+	AccountID     string        `json:"accountId,omitempty"`
+	AccountLabel  string        `json:"accountLabel,omitempty"`
+	DeviceID      string        `json:"deviceId,omitempty"`
+	DeviceName    string        `json:"deviceName,omitempty"`
+	CheckedAt     time.Time     `json:"checkedAt,omitempty"`
+	ReceivedAt    time.Time     `json:"receivedAt,omitempty"`
+	Source        string        `json:"source,omitempty"`
+	Version       string        `json:"version,omitempty"`
+	Plan          string        `json:"plan,omitempty"`
+	Primary       *Window       `json:"primary,omitempty"`
+	Secondary     *Window       `json:"secondary,omitempty"`
+	Extra         []ExtraWindow `json:"extra"`
+	ResetCredits  int           `json:"resetCredits,omitempty"`
+	UpdatedAt     time.Time     `json:"updatedAt"`
+	Stale         bool          `json:"stale,omitempty"`
+	Error         string        `json:"error,omitempty"`
 }
 
 type Response struct {
@@ -61,6 +66,8 @@ type Collector struct {
 	log       *slog.Logger
 	run       commandRunner
 	OnCollect func(ProviderLimits)
+	grok      grokSource
+	opencode  openCodeSource
 
 	mu        sync.RWMutex
 	providers map[string]ProviderLimits
@@ -71,6 +78,8 @@ func New(command string, logger *slog.Logger) *Collector {
 		command:   command,
 		log:       logger,
 		run:       runCommand,
+		grok:      defaultGrokSource(),
+		opencode:  defaultOpenCodeSource(),
 		providers: make(map[string]ProviderLimits),
 	}
 }
@@ -79,6 +88,8 @@ func (c *Collector) Start(ctx context.Context) {
 	go c.loop(ctx, "codex", "oauth", time.Minute)
 	go c.loop(ctx, "claude", "cli", 3*time.Minute)
 	go c.loop(ctx, "antigravity", "auto", 3*time.Minute)
+	go c.loop(ctx, "grok", "cli-proxy", 3*time.Minute)
+	go c.loop(ctx, "opencode", "api", 3*time.Minute)
 }
 
 func (c *Collector) loop(ctx context.Context, provider, source string, interval time.Duration) {
@@ -97,6 +108,12 @@ func (c *Collector) loop(ctx context.Context, provider, source string, interval 
 
 func (c *Collector) collect(ctx context.Context, provider, source string) {
 	result := c.Probe(ctx, provider, source)
+	if result.NotConfigured {
+		c.mu.Lock()
+		delete(c.providers, provider)
+		c.mu.Unlock()
+		return
+	}
 	if result.Stale {
 		c.mu.RLock()
 		previous, hasPrevious := c.providers[provider]
@@ -123,14 +140,11 @@ func (c *Collector) Probe(ctx context.Context, provider, source string) Provider
 	started := time.Now().UTC()
 	commandCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	raw, err := c.run(commandCtx, c.command, "usage", "--provider", provider, "--source", source, "--format", "json", "--no-color")
-	var result ProviderLimits
-	if len(raw) > 0 {
-		parsed, parseErr := decode(provider, raw)
-		if err == nil || parseErr != nil {
-			result, err = parsed, parseErr
-		}
+	result, err := c.fetch(commandCtx, provider, source)
+	if errors.Is(err, errNotConfigured) {
+		return ProviderLimits{Provider: provider, NotConfigured: true}
 	}
+
 	if err == nil && !result.HasWindows() {
 		err = errors.New("Provider returned no quota windows")
 	}
@@ -142,6 +156,24 @@ func (c *Collector) Probe(ctx context.Context, provider, source string) Provider
 		return ProviderLimits{Provider: provider, Source: source, UpdatedAt: started, Stale: true, Error: message, Extra: []ExtraWindow{}}
 	}
 	return result
+}
+
+// fetch keeps native Grok/OpenCode sources available to both local and distributed collectors.
+func (c *Collector) fetch(ctx context.Context, provider, source string) (ProviderLimits, error) {
+	switch provider {
+	case "grok":
+		return c.fetchGrok(ctx)
+	case "opencode":
+		return c.fetchOpenCode(ctx)
+	}
+	raw, err := c.run(ctx, c.command, "usage", "--provider", provider, "--source", source, "--format", "json", "--no-color")
+	if len(raw) > 0 {
+		parsed, parseErr := decode(provider, raw)
+		if err == nil || parseErr != nil {
+			return parsed, parseErr
+		}
+	}
+	return ProviderLimits{}, err
 }
 
 func (c *Collector) Snapshot(timezone string) Response {
@@ -249,7 +281,7 @@ func runCommand(ctx context.Context, command string, args ...string) ([]byte, er
 	if err != nil {
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) && len(exitError.Stderr) > 0 {
-			return output, fmt.Errorf("CodexBar command failed (exit %d)", exitError.ExitCode())
+			return output, fmt.Errorf("%s command failed (exit %d)", filepath.Base(command), exitError.ExitCode())
 		}
 		return output, err
 	}

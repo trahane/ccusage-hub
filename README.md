@@ -132,6 +132,44 @@ providers. The hub keeps named Gemini and Claude/GPT quota windows, including
 five-hour and weekly buckets when available. Unknown usage is omitted; quota
 percentages are never converted into token or cost estimates.
 
+Grok and OpenCode Go can also report directly from clients: add `grok` and
+`opencode` to `limitProviders`. They use the native collectors below and do not
+require CodexBar. Credentials must be present on the reporting host. Hosts without
+these logins skip the unconfigured provider rather than send an empty quota.
+
+### Grok quotas
+The hub reads Grok quotas the way CodexBar's `grok-cli-proxy` source does: it
+uses the Grok CLI's own login in `~/.grok/auth.json` (or `$GROK_HOME`) to call
+the CLI billing proxy. Install the Grok CLI for the server user on the hub host
+and sign in there; on a headless machine use `grok login --device-auth`.
+
+When the saved token is about to expire or is rejected, the hub runs
+`grok models` so the CLI refreshes its own login, then reads the file again. The
+hub never writes the CLI's credentials. It looks for the CLI at
+`$GROK_HOME/bin/grok`, then on `PATH`; set `CCUSAGE_HUB_GROK_COMMAND` to override.
+
+Grok's quota is weekly or monthly, so it is returned as `secondary` with its
+period length in `windowMinutes`; `primary` is used only for a window shorter
+than a day. `plan` is the CLI's subscription display name, such as `X Premium`.
+API-key logins have no subscription quota and are ignored. Until the Grok CLI
+is signed in on the hub host, Grok is left out of the response.
+
+### OpenCode Go quotas
+The hub reads OpenCode Go quotas from `https://opencode.ai/zen/go/v1/usage`, the
+API t3code and CodexBar use, with the API key the OpenCode CLI stores for the
+server user. Keys are tried in OpenCode's own order: the selected OpenCode
+Console credential in OpenCode 2's database (`opencode.db`, or `$OPENCODE_DB`),
+then the `opencode-go` key in `auth.json`, then `OPENCODE_API_KEY`. Both files are
+under `$XDG_DATA_HOME/opencode` (default `~/.local/share/opencode`); keys tied to
+a self-hosted OpenCode server are skipped.
+
+`primary` is the rolling five-hour window, `secondary` the weekly window, and the
+monthly window appears in `extra` as `Monthly` with an unknown duration. `plan` is
+`Go`. Without a key, or with a key that has no Go subscription, OpenCode is left
+out of the response; an expired or revoked key is reported with OpenCode's
+message. OpenCode API keys expire and are not renewed by signing in again, so
+replace an expired key in OpenCode Console.
+
 ## API
 
 | Method | Path | Purpose |

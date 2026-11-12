@@ -152,3 +152,19 @@ func TestCLIErrorOutputIsNormalizedWithoutLeakingExtraFields(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUnconfiguredNativeProviderDoesNotPostEmptyLimits(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("unconfigured provider sent a report")
+		w.WriteHeader(500)
+	}))
+	defer server.Close()
+	c := testLimitsClient(server.URL)
+	c.Config.LimitProviders = []string{"opencode"}
+	c.probeLimits = func(context.Context, string) limits.ProviderLimits {
+		return limits.ProviderLimits{Provider: "opencode", NotConfigured: true}
+	}
+	if err := c.PushLimits(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
